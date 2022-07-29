@@ -25,7 +25,7 @@ class BvhJoint:
         self.children.append(child)
 
     def __repr__(self):
-        return self.name
+        return 'Joint_' + self.name
 
     def position_animated(self):
         return any([x.endswith('position') for x in self.channels])
@@ -34,7 +34,28 @@ class BvhJoint:
         return any([x.endswith('rotation') for x in self.channels])
 
 
-# -
+# +
+def _recursive_write_hierarchy(file, joint, degree):
+    if degree == 0:
+        name = 'ROOT ' + joint.name
+    elif joint.name[-4:] == '_end':
+        name = 'End Site'
+    else:
+        name = 'JOINT ' + joint.name
+    file.write('\t' * degree + name + '\n')
+    file.write('\t' * degree + '{\n')
+    tmp = ' '.join([f'{el:f}' for el in joint.offset])
+    file.write('\t' * (degree + 1) + 'OFFSET ' + tmp + '\n')
+    tmp = ' '.join(joint.channels)
+    if degree==0:
+        file.write('\t' * (degree + 1) + f'CHANNELS {len(joint.channels)} ' + tmp + ' \n')
+    elif joint.name[-4:] == '_end':
+        ...
+    else:
+        file.write('\t' * (degree + 1) + f'CHANNELS {len(joint.channels)} ' + tmp + '\n')
+    for children in joint.children:
+        _recursive_write_hierarchy(file, children, degree + 1)
+    file.write('\t' * degree + '}\n')
 
 class Bvh:
     def __init__(self):
@@ -267,10 +288,24 @@ class Bvh:
         ax = fig.add_subplot(111, projection='3d')
         for i in range(self.frames):
             self.plot_frame(i, fig, ax)
+    
+    def write_to_bvh(self, file_name):
+        output = open(file_name, 'w')
+        output.write('HIERARCHY\n')
+        _recursive_write_hierarchy(output, self.root, 0)
+        output.write(f'MOTION\n')
+        output.write(f'Frames: {self.frames}\n')
+        output.write(f'Frame Time: {1/self.fps:f}\n')
+        for raw in self.keyframes:
+            output.write(' '.join([f'{el:f}' for el in raw]))
+            output.write('\n')
+        output.close()
 
     def __repr__(self):
         return f"BVH {len(self.joints.keys())} joints, {self.frames} frames"
 
+
+# -
 
 if __name__ == '__main__':
     # create Bvh parser
