@@ -367,7 +367,7 @@ class Bvh:
         for raw in self.keyframes:
             output.write(' '.join([f'{el:f}' for el in raw.reshape(-1)]))
             output.write('\n')
-        print('Wrote', file_name)
+        print(f'Wrote "{file_name}"')
         output.close()
 
     def __repr__(self):
