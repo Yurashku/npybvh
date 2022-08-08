@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
 import numpy as np
 import re
+import pickle
 from transforms3d.euler import euler2mat, mat2euler
+from scipy.spatial.transform import Rotation
 
 
 # +
@@ -12,6 +15,57 @@ def centering(poses, coefs=(5, 1, 5)):
         rad = (r - l)/2
         limits.append([center - rad * coefs[ax_n], center + rad * coefs[ax_n]])
     return np.array(limits)
+
+
+def pair2matrix(v_start, v_finish):
+    '''
+    Вычисляет матрицу кратчайшего поворота, сопоставляющий два вектора
+    '''
+    v_start = v_start / np.linalg.norm(v_start)
+    v_finish = v_finish / np.linalg.norm(v_finish)
+    theta = np.arccos(np.clip(np.dot(v_start, v_finish), -1.0, 1.0))
+    
+    quat_copmponents = np.zeros(4)
+    quat_copmponents[3] = np.cos(theta / 2)
+    n = np.cross(v_start, v_finish)
+    n = n / np.linalg.norm(n)
+    quat_copmponents[:3] = n * np.sin(theta / 2)
+    
+    r = Rotation.from_quat(quat_copmponents)
+    return r.as_matrix()
+        
+
+def get_matrix_rotation(joint, frame_number, p, joint_name_index):
+    '''
+    Вычисляет матрицу поворота, соответствующую заданной вершине joint
+    '''
+    parent = joint
+    children = parent.children
+    
+    starts = np.array([ch.offset for ch in children])
+    finishes = np.array([p[frame_number, joint_name_index[ch.name]] -
+                         p[frame_number, joint_name_index[parent.name]]
+                         for ch in children])
+    
+    
+    if len(children) > 1:
+        rot = Rotation.align_vectors(starts, finishes)[0]
+        total_child_matrix = rot.inv().as_matrix()
+        
+    elif len(children) == 1:
+#         print('rotation with 1 vector', joint.__repr__())
+        if np.linalg.norm(finishes[0]) < 0.0001:
+            total_child_matrix = np.eye(3, dtype=float)
+        else:
+            total_child_matrix = pair2matrix(starts[0], finishes[0])
+    else:
+        print('0-dimension children pool in ' + joint.__repr__())
+        total_child_matrix = np.eye(3, dtype=float)
+    
+    
+    return total_child_matrix
+
+
 
 class BvhJoint:
     def __init__(self, name, parent):
@@ -119,6 +173,14 @@ class Bvh:
         ax.set_zlim(*limits[1])
         ax.scatter(pos[:, 0], pos[:, 2], pos[:, 1])
         plt.show()
+
+
+    def get_initial_poses(self):
+        poses = []
+        self._add_pose_recursive(self.root, np.zeros(3), poses)
+        pos = np.array(poses)
+        
+        return pos
 
     def parse_motion(self, text):
         lines = re.split('\\s*\\n+\\s*', text)
@@ -262,6 +324,10 @@ class Bvh:
 
         ax.cla()
         limits = centering(p)
+#         #debug changes
+#         cut_index = 3
+#         ax.scatter(p[:cut_index, 0], p[:cut_index, 2], p[:cut_index, 1], c='red')
+#         ax.scatter(p[cut_index:, 0], p[cut_index:, 2], p[cut_index:, 1])
         ax.scatter(p[:, 0], p[:, 2], p[:, 1])
         ax.set_xlim(*limits[0])
         ax.set_ylim(*limits[2])
@@ -290,6 +356,8 @@ class Bvh:
             self.plot_frame(i, fig, ax)
     
     def write_to_bvh(self, file_name):
+        if self.keyframes is None:
+            raise ValueError('bvh object is empty for now!')
         output = open(file_name, 'w')
         output.write('HIERARCHY\n')
         _recursive_write_hierarchy(output, self.root, 0)
@@ -297,14 +365,82 @@ class Bvh:
         output.write(f'Frames: {self.frames}\n')
         output.write(f'Frame Time: {1/self.fps:f}\n')
         for raw in self.keyframes:
-            output.write(' '.join([f'{el:f}' for el in raw]))
+            output.write(' '.join([f'{el:f}' for el in raw.reshape(-1)]))
             output.write('\n')
+        print('Wrote', file_name)
         output.close()
 
     def __repr__(self):
         return f"BVH {len(self.joints.keys())} joints, {self.frames} frames"
+    
+    
+    def get_frame_channels_recursively(self, p, joint, frame_number, parent_global_matrix, frame_channel, joint_name_index):
+        if joint == self.root:
+            frame_channel.extend(p[frame_number, joint_name_index[joint.name]] - joint.offset)
+        if joint.name.endswith('_end'):
+            return
+        global_matrix = get_matrix_rotation(joint, frame_number, p, joint_name_index)
+        offset_matrix = parent_global_matrix.T @ global_matrix
+        angles = Rotation.from_matrix(offset_matrix).as_euler('xyz', degrees=True)[::-1]
+        frame_channel.extend(angles)
+
+        for child in joint.children:
+            self.get_frame_channels_recursively(p, child, frame_number, global_matrix, frame_channel, joint_name_index)
+
+            
+            
+    def get_channels(self, p, joint_name_index):
+        channels = []
+        for frame_number in range(self.frames):
+            frame_channel = []
+            self.get_frame_channels_recursively(p, self.root, frame_number, np.eye(3), frame_channel, joint_name_index)
+            channels.append(frame_channel.copy())
+        self.keyframes = np.array(channels)
+        
+
+        
+        
+    def extract_from_3D(self, p, parent_name_dict, joint_name_index, FPS, Tpose=None):
+        names = list(parent_name_dict.keys())
+
+        joints_list = {}
+
+        for nm in names:
+            prnt = parent_name_dict[nm]
+            joints_list[nm] = BvhJoint(nm, prnt)
+
+        self.joints = joints_list
+
+        for nm, joint in self.joints.items():
+            for ifch in names:
+                if parent_name_dict[ifch] == nm:
+                    joint.add_child(self.joints[ifch])
+
+        self.root = self.joints[[k for k,v in parent_name_dict.items() if v is None][0]]
+        self.fps = FPS
+        self.frames = len(p)
+        # записываем названия каналов
+        total_channels = 0
+        for joint in self.joints.values():
+            if joint == self.root:
+                joint.channels = ['Xposition', 'Yposition', 'Zposition', 'Zrotation', 'Yrotation', 'Xrotation']
+                total_channels += 6
+            elif joint.name.endswith('_end'):
+                joint.channels = []
+            else:
+                joint.channels = ['Zrotation', 'Yrotation', 'Xrotation']
+                total_channels += 3
+
+        # запоминаем initial offsets
+        if Tpose is None:
+            Tpose = 'default_bvh_parameters/lafan_init_offsets.pickle'
+        with open(Tpose, 'rb') as f:
+            init_offsets = pickle.load(f)
+        for joint in self.joints.values():
+            joint.offset = init_offsets[joint.name]
 
 
+        self.get_channels(p, joint_name_index)
 # -
 
 if __name__ == '__main__':
