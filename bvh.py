@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
+# +
 import numpy as np
 import re
 import pickle
 from transforms3d.euler import euler2mat, mat2euler
 from scipy.spatial.transform import Rotation
 
-
-# +
 def centering(poses, coefs=(5, 1, 5)):
     limits = []
     for ax_n in range(3):
         l, r = np.min(poses[..., ax_n]), np.max(poses[..., ax_n])
         center = (l + r)/2
-        rad = (r - l)/2
+        rad = max((r - l)/2, 1)
         limits.append([center - rad * coefs[ax_n], center + rad * coefs[ax_n]])
     return np.array(limits)
 
@@ -59,7 +58,7 @@ def get_matrix_rotation(joint, frame_number, p, joint_name_index):
         else:
             total_child_matrix = pair2matrix(starts[0], finishes[0])
     else:
-        print('0-dimension children pool in ' + joint.__repr__())
+#         print('0-dimension children pool in ' + joint.__repr__())
         total_child_matrix = np.eye(3, dtype=float)
     
     
@@ -87,8 +86,6 @@ class BvhJoint:
     def rotation_animated(self):
         return any([x.endswith('rotation') for x in self.channels])
 
-
-# +
 def _recursive_write_hierarchy(file, joint, degree):
     if degree == 0:
         name = 'ROOT ' + joint.name
@@ -441,7 +438,6 @@ class Bvh:
 
 
         self.get_channels(p, joint_name_index)
-# -
 
 if __name__ == '__main__':
     # create Bvh parser
