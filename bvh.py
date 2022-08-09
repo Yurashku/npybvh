@@ -400,7 +400,7 @@ class Bvh:
 
         
         
-    def extract_from_3D(self, p, parent_name_dict, joint_name_index, FPS, Tpose=None):
+    def extract_from_3D(self, p, parent_name_dict, joint_name_index, FPS, init_offsets):
         names = list(parent_name_dict.keys())
 
         joints_list = {}
@@ -432,10 +432,10 @@ class Bvh:
                 total_channels += 3
 
         # запоминаем initial offsets
-        if Tpose is None:
-            Tpose = 'default_bvh_parameters/lafan_init_offsets.pickle'
-        with open(Tpose, 'rb') as f:
-            init_offsets = pickle.load(f)
+#         if Tpose is None:
+#             Tpose = 'default_bvh_parameters/lafan_init_offsets.pickle'
+#         with open(Tpose, 'rb') as f:
+#             init_offsets = pickle.load(f)
         for joint in self.joints.values():
             joint.offset = init_offsets[joint.name]
 
