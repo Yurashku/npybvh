@@ -48,7 +48,15 @@ def get_matrix_rotation(joint, frame_number, p, joint_name_index):
     
     
     if len(children) > 1:
-        rot = Rotation.align_vectors(starts, finishes)[0]
+        try:
+            rot = Rotation.align_vectors(starts, finishes)[0]
+        except:
+            print(parent)
+            print(children)
+            print(starts, finishes)
+            print(joint, frame_number, joint_name_index, sep='\n')
+            
+            raise ValueError()
         total_child_matrix = rot.inv().as_matrix()
         
     elif len(children) == 1:
@@ -73,6 +81,7 @@ class BvhJoint:
         self.offset = np.zeros(3)
         self.channels = []
         self.children = []
+        self.bone_length = None
 
     def add_child(self, child):
         self.children.append(child)
@@ -364,7 +373,6 @@ class Bvh:
         for raw in self.keyframes:
             output.write(' '.join([f'{el:f}' for el in raw.reshape(-1)]))
             output.write('\n')
-        print(f'Wrote "{file_name}"')
         output.close()
 
     def __repr__(self):
@@ -435,6 +443,12 @@ class Bvh:
 #             init_offsets = pickle.load(f)
         for joint in self.joints.values():
             joint.offset = init_offsets[joint.name]
+            # выравнивание длин
+            if joint != self.root:
+                joint_index = joint_name_index[joint.name]
+                parent_index = joint_name_index[parent_name_dict[joint.name]]
+                length = np.linalg.norm(p[:, joint_index, :] - p[:, parent_index, :], axis=1).mean()
+                joint.offset = joint.offset * length / np.linalg.norm(joint.offset)
 
 
         self.get_channels(p, joint_name_index)
