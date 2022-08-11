@@ -48,15 +48,7 @@ def get_matrix_rotation(joint, frame_number, p, joint_name_index):
     
     
     if len(children) > 1:
-        try:
-            rot = Rotation.align_vectors(starts, finishes)[0]
-        except:
-            print(parent)
-            print(children)
-            print(starts, finishes)
-            print(joint, frame_number, joint_name_index, sep='\n')
-            
-            raise ValueError()
+        rot = Rotation.align_vectors(starts, finishes)[0]
         total_child_matrix = rot.inv().as_matrix()
         
     elif len(children) == 1:
